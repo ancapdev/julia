@@ -1220,7 +1220,6 @@ JL_DLLEXPORT void jl_set_next_task(jl_task_t *task) JL_NOTSAFEPOINT;
 
 extern jl_mutex_t typecache_lock;
 extern jl_mutex_t codegen_lock;
-extern jl_mutex_t safepoint_lock;
 
 #if defined(__APPLE__)
 void jl_mach_gc_end(void);

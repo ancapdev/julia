@@ -104,6 +104,46 @@ function compare_inconsistent(x::T) where T
 end
 @test !compare_inconsistent(3)
 
+# allocation/access of uninitialized fields should taint the :consistent-cy
+import Core.Compiler: Const, getfield_notundefined
+for val = (1, :x)
+    name = Const(val)
+    @test getfield_notundefined(Base.RefValue{String}, name)
+    @test !getfield_notundefined(Base.RefValue{Int}, name)
+    @test getfield_notundefined(Base.RefValue{Integer}, name)
+    @test !getfield_notundefined(Base.RefValue{<:Integer}, name)
+    @test !getfield_notundefined(Base.RefValue{Union{Int32,Int64}}, name)
+    @test !getfield_notundefined(Base.RefValue, name)
+    @test !getfield_notundefined(Any, name)
+end
+for val = (0, 2, :y) # throw doesn't account for undefined behavior
+    name = Const(val)
+    @test getfield_notundefined(Base.RefValue{String}, name)
+    @test getfield_notundefined(Base.RefValue{Int}, name)
+    @test getfield_notundefined(Base.RefValue{Integer}, name)
+    @test getfield_notundefined(Base.RefValue{<:Integer}, name)
+    @test getfield_notundefined(Base.RefValue{Union{Int32,Int64}}, name)
+    @test getfield_notundefined(Base.RefValue, name)
+    @test !getfield_notundefined(Any, name)
+end
+# TODO test with Ref once we handle mutability more nicely
+struct Maybe{T}
+    x::T
+    Maybe{T}() where T = new{T}()
+    Maybe{T}(x) where T = new{T}(x)
+    Maybe(x::T) where T = new{T}(x)
+end
+Base.getindex(x::Maybe) = x.x
+@test Base.infer_effects() do
+    Maybe{Int}()
+end |> !Core.Compiler.is_consistent
+@test Base.infer_effects() do
+    Maybe{Int}()[]
+end |> !Core.Compiler.is_consistent
+@test !fully_eliminated() do
+    Maybe{Int}()[]
+end
+
 # effects propagation for `Core.invoke` calls
 # https://github.com/JuliaLang/julia/issues/44763
 global x44763::Int = 0

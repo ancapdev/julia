@@ -971,6 +971,38 @@ function _getfield_tfunc(@nospecialize(s00), @nospecialize(name), setfield::Bool
     return rewrap_unionall(R, s00)
 end
 
+function getfield_notundefined(@nospecialize(obj), @nospecialize(name))
+    isa(name, Const) || return false
+    return _getfield_notundefined(widenconst(obj), name)
+end
+function _getfield_notundefined(@nospecialize(typ0), name::Const)
+    typ = unwrap_unionall(typ0)
+    if isa(typ, Union)
+        return _getfield_notundefined(rewrap_unionall(typ.a, typ0), name) &&
+               _getfield_notundefined(rewrap_unionall(typ.b, typ0), name)
+    end
+    isa(typ, DataType) || return false
+    name = name.val
+    if isa(name, Symbol)
+        fidx = fieldindex(typ, name, false)
+        fidx === nothing && return true # always throw doesn't account for undefined
+    elseif isa(name, Int)
+        fidx = name
+    else
+        return false
+    end
+    fcnt = fieldcount_noerror(typ)
+    fcnt === nothing && return false
+    0 < fidx ≤ fcnt || return true # always throw doesn't account for undefined behaviour
+    ftyp = fieldtype(typ, fidx)
+    is_undefref_fieldtype(ftyp) && return true
+    return fidx ≤ datatype_min_ninitialized(typ)
+end
+
+function is_undefref_fieldtype(@nospecialize ftyp)
+    return !has_free_typevars(ftyp) && !allocatedinline(ftyp)
+end
+
 function setfield!_tfunc(o, f, v, order)
     @nospecialize
     if !isvarargtype(order)
@@ -1816,6 +1848,10 @@ function builtin_effects(f::Builtin, argtypes::Vector{Any}, @nospecialize(rt))
         end
         s = s::DataType
         consistent = !ismutabletype(s) ? ALWAYS_TRUE : ALWAYS_FALSE
+        # access to undefined field leads to undefined behavior and should taint `:consistent`-cy
+        if f === Core.getfield && !getfield_notundefined(s, argtypes[2])
+            consistent = ALWAYS_FALSE
+        end
         if f === Core.getfield && !isvarargtype(argtypes[end]) && getfield_boundscheck(argtypes) !== true
             # If we cannot independently prove inboundsness, taint consistency.
             # The inbounds-ness assertion requires dynamic reachability, while
